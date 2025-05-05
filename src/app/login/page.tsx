@@ -1,15 +1,30 @@
 'use client'
 
 import LoginFooter from '@/components/LoginFooter'
+import { useErrorToast } from '@/hooks/useErrorToast'
+import { useSuccessToast } from '@/hooks/useSuccessToast'
+import { signIn } from '@/lib/auth'
+import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [senha, setSenha] = useState('')
+  const router = useRouter()
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const showError = useErrorToast()
+  const showSuccess = useSuccessToast()
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    console.log({ email, senha })
+
+    try {
+      const { user } = await signIn(email, senha)
+      showSuccess(`Bem-vindo, ${user?.email || 'usuário'}!`)
+      router.push('/dashboard')
+    } catch (err) {
+      showError(err, 'Não foi possível entrar')
+    }
   }
 
   return (
@@ -39,6 +54,7 @@ export default function LoginPage() {
             <label className="block text-sm mb-1">Senha</label>
             <input
               type="password"
+              placeholder="••••••••"
               className="w-full px-3 py-2 rounded-md bg-neutral-800 border border-neutral-700 text-white focus:outline-none focus:ring-2 focus:ring-neutral-600 transition"
               value={senha}
               onChange={(e) => setSenha(e.target.value)}
