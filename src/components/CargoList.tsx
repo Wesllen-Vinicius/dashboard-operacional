@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react'
 import { FiEdit2, FiTrash2 } from 'react-icons/fi'
 import { supabase } from '@/lib/supabase'
 import { useErrorToast } from '@/hooks/useErrorToast'
+import { useConfirm } from '@/hooks/useConfirm'
+import { useCargoEdit } from '@/hooks/useCargoEdit'
 import CargoListSkeleton from './CargoListSkeleton'
 
 interface Cargo {
@@ -15,7 +17,10 @@ export default function CargoList() {
   const [cargos, setCargos] = useState<Cargo[]>([])
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
+
   const showError = useErrorToast()
+  const { confirm } = useConfirm()
+  const { setCargo } = useCargoEdit() // <- Aqui usamos o hook correto
 
   const fetchCargos = async () => {
     setLoading(true)
@@ -32,11 +37,13 @@ export default function CargoList() {
     setLoading(false)
   }
 
-  const handleDelete = async (id: string) => {
-    const { error } = await supabase.from('cargos').delete().eq('id', id)
-    if (error) return showError(error.message)
-    setCargos(prev => prev.filter(c => c.id !== id))
-    window.dispatchEvent(new Event('cargo-added'))
+  const handleDelete = (id: string) => {
+    confirm('Tem certeza que deseja excluir este cargo?', async () => {
+      const { error } = await supabase.from('cargos').delete().eq('id', id)
+      if (error) return showError(error.message)
+      setCargos(prev => prev.filter(c => c.id !== id))
+      window.dispatchEvent(new Event('cargo-added'))
+    })
   }
 
   useEffect(() => {
@@ -73,6 +80,7 @@ export default function CargoList() {
               <span className="text-white truncate">{cargo.nome}</span>
               <div className="flex items-center gap-3">
                 <button
+                  onClick={() => setCargo(cargo)} // <- Aqui passa o objeto inteiro
                   className="text-blue-500 hover:text-blue-400 transition"
                   aria-label="Editar"
                 >
