@@ -1,28 +1,36 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { FiArchive, FiDollarSign, FiHome, FiMenu, FiPackage, FiUser, FiUsers } from 'react-icons/fi'
+import {
+  FiArchive,
+  FiDollarSign,
+  FiHome,
+  FiMenu,
+  FiPackage,
+  FiUser,
+  FiUsers,
+  FiBriefcase
+} from 'react-icons/fi'
 import SidebarItem from './SidebarItem'
 
 const navItems = [
-  { name: 'Início', path: '/', icon: <FiHome /> },
-  { name: 'Funcionários', path: '/funcionarios', icon: <FiUsers /> },
-  { name: 'Clientes', path: '/clientes', icon: <FiUser /> },
-  { name: 'Produtos', path: '/produtos', icon: <FiPackage /> },
-  { name: 'Estoque', path: '/estoque', icon: <FiArchive /> },
-  { name: 'Financeiro', path: '/financeiro', icon: <FiDollarSign /> },
+  { name: 'Início', path: '/dashboard', icon: <FiHome /> },
+  { name: 'Funcionários', path: '/dashboard/funcionarios', icon: <FiUsers /> },
+  { name: 'Clientes', path: '/dashboard/clientes', icon: <FiUser /> },
+  { name: 'Produtos', path: '/dashboard/produtos', icon: <FiPackage /> },
+  { name: 'Estoque', path: '/dashboard/estoque', icon: <FiArchive /> },
+  { name: 'Financeiro', path: '/dashboard/financeiro', icon: <FiDollarSign /> },
+  { name: 'Cargos', path: '/dashboard/cargos', icon: <FiBriefcase /> },
 ]
 
 export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(false)
 
-  // Carrega o estado salvo ao montar
   useEffect(() => {
     const saved = localStorage.getItem('sidebar-collapsed')
     if (saved !== null) setCollapsed(saved === 'true')
   }, [])
 
-  // Salva o estado sempre que mudar
   useEffect(() => {
     localStorage.setItem('sidebar-collapsed', collapsed.toString())
   }, [collapsed])

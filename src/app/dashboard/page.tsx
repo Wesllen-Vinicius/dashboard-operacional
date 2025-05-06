@@ -6,7 +6,7 @@ import PageContainer from '@/components/PageContainer'
 export default function Home() {
   return (
     <PageContainer title="Dashboard Operacional">
-      {/* Resumos principais */}
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         <Card title="Funcionários" value="42" />
         <Card title="Clientes" value="123" />

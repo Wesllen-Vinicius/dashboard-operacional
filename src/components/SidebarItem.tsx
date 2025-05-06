@@ -20,11 +20,7 @@ export default function SidebarItem({ name, path, icon, collapsed }: SidebarItem
       href={path}
       className={`flex items-center gap-3 px-3 py-2 rounded-md transition-all duration-200 relative
         ${collapsed ? 'justify-center' : ''}
-        ${
-          isActive
-            ? 'bg-neutral-800 text-white'
-            : 'hover:bg-neutral-800 text-neutral-400'
-        }`}
+        ${isActive ? 'bg-neutral-800 text-white' : 'hover:bg-neutral-800 text-neutral-400'}`}
     >
       <span className="text-lg relative group">
         {icon}
