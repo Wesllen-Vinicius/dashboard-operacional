@@ -1,11 +1,11 @@
-'use client'
+"use client";
 
-import { useConfirm } from '@/hooks/useConfirm'
+import { useConfirm } from "@/hooks/useConfirm";
 
 export default function ConfirmDialog() {
-  const { open, message, onConfirm, close } = useConfirm()
+  const { open, message, onConfirm, close } = useConfirm();
 
-  if (!open) return null
+  if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -20,8 +20,8 @@ export default function ConfirmDialog() {
           </button>
           <button
             onClick={() => {
-              close()
-              onConfirm()
+              close();
+              onConfirm();
             }}
             className="px-4 py-2 text-sm rounded bg-red-600 hover:bg-red-500 transition"
           >
@@ -30,5 +30,5 @@ export default function ConfirmDialog() {
         </div>
       </div>
     </div>
-  )
+  );
 }

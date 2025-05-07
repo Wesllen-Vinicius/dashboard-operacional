@@ -1,58 +1,142 @@
-'use client'
+"use client";
 
-import PageContainer from '@/components/PageContainer'
-import { useState } from 'react'
+import PageContainer from "@/components/PageContainer";
+import SimpleForm from "@/components/GenericForm";
+import { GenericList } from "@/components/GenericList";
+import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabase";
+import { useErrorToast } from "@/hooks/useErrorToast";
+import ListSkeleton from "@/components/ListSkeleton";
+import { useConfirm } from "@/hooks/useConfirm";
+import {
+  cadastrarFuncionario,
+  atualizarFuncionario,
+  deletarFuncionario,
+} from "@/lib/actions/funcionario";
+import { useSuccessToast } from "@/hooks/useSuccessToast";
+
+interface Funcionario {
+  id: string;
+  nome: string;
+  cargo_id: string | null;
+  cargo_nome?: string;
+}
+
+interface Cargo {
+  id: string;
+  nome: string;
+}
 
 export default function FuncionariosPage() {
-  const [nome, setNome] = useState('')
-  const [email, setEmail] = useState('')
-  const [cargo, setCargo] = useState('')
+  const [cargos, setCargos] = useState<Cargo[]>([]);
+  const [funcionarios, setFuncionarios] = useState<Funcionario[]>([]);
+  const [selected, setSelected] = useState<Funcionario | null>(null);
+  const [loading, setLoading] = useState(false);
+  const error = useErrorToast();
+  const success = useSuccessToast();
+  const { confirm } = useConfirm();
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    console.log({ nome, email, cargo })
-  }
+  useEffect(() => {
+    fetchCargos();
+    fetchFuncionarios();
+    const handler = () => fetchFuncionarios();
+    window.addEventListener("funcionario-added", handler);
+    return () => window.removeEventListener("funcionario-added", handler);
+  }, []);
+
+  const fetchCargos = async () => {
+    const { data, error: err } = await supabase
+      .from("cargos")
+      .select("id, nome");
+    if (err) error(err.message);
+    else setCargos(data || []);
+  };
+
+  const fetchFuncionarios = async () => {
+    setLoading(true);
+    const { data, error: err } = await supabase
+      .from("funcionarios")
+      .select("id, nome, cargo_id, cargos ( nome )")
+      .order("created_at", { ascending: false });
+
+    if (err) {
+      error(err.message);
+    } else {
+      const list = (data || []).map((f: any) => ({
+        ...f,
+        cargo_nome: f.cargos?.nome ?? "Sem cargo",
+      }));
+      setFuncionarios(list);
+    }
+
+    setLoading(false);
+  };
 
   return (
-    <PageContainer title="Cadastrar Funcionário">
-      <form onSubmit={handleSubmit} className="space-y-5 max-w-xl">
-        <div>
-          <label className="block text-sm text-neutral-400 mb-1">Nome</label>
-          <input
-            type="text"
-            value={nome}
-            onChange={(e) => setNome(e.target.value)}
-            className="w-full px-3 py-2 rounded-md bg-neutral-800 border border-neutral-700 text-neutral-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition"
-          />
-        </div>
+    <PageContainer title="Funcionários">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 items-start">
+        {/* Formulário */}
+        <SimpleForm
+          fields={[
+            {
+              name: "nome",
+              label: "Nome",
+              placeholder: "Ex: João da Silva",
+              required: true,
+            },
+            {
+              name: "cargo_id",
+              label: "Cargo",
+              required: false,
+              type: "select",
+              placeholder: "Selecione um cargo",
+              options: cargos.map((cargo) => ({
+                label: cargo.nome,
+                value: cargo.id,
+              })),
+            },
+          ]}
+          itemToEdit={selected}
+          onClear={() => setSelected(null)}
+          onCreate={async (data) => {
+            await cadastrarFuncionario(data.nome!!, data.cargo_id ?? null);
+          }}
+          onUpdate={async (id, data) => {
+            await atualizarFuncionario(id, data.nome!!, data.cargo_id ?? null);
+          }}
+          successCreateMessage="Funcionário cadastrado com sucesso"
+          successUpdateMessage="Funcionário atualizado com sucesso"
+          eventDispatchName="funcionario-added"
+        />
 
-        <div>
-          <label className="block text-sm text-neutral-400 mb-1">Email</label>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full px-3 py-2 rounded-md bg-neutral-800 border border-neutral-700 text-neutral-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition"
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm text-neutral-400 mb-1">Cargo</label>
-          <input
-            type="text"
-            value={cargo}
-            onChange={(e) => setCargo(e.target.value)}
-            className="w-full px-3 py-2 rounded-md bg-neutral-800 border border-neutral-700 text-neutral-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition"
-          />
-        </div>
-
-        <button
-          type="submit"
-          className="w-full py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition"
-        >
-          Salvar
-        </button>
-      </form>
+        {/* Lista */}
+        <GenericList<Funcionario>
+          items={funcionarios}
+          searchableField="nome"
+          loading={loading}
+          onEdit={setSelected}
+          onDelete={async (funcionario) => {
+            confirm("Deseja realmente excluir este funcionário?", async () => {
+              try {
+                await deletarFuncionario(funcionario.id);
+                window.dispatchEvent(new Event("funcionario-added"));
+                success("Funcionario deletado com sucesso!");
+              } catch (err: any) {
+                error(err, "Erro ao deletar funcionário");
+              }
+            });
+          }}
+          renderItem={(f) => (
+            <div>
+              <p className="text-white font-medium">{f.nome}</p>
+              <p className="text-neutral-500 text-xs">{f.cargo_nome}</p>
+            </div>
+          )}
+          searchPlaceholder="Buscar funcionário..."
+          emptyMessage="Nenhum funcionário encontrado."
+          skeleton={<ListSkeleton count={6} />}
+        />
+      </div>
     </PageContainer>
-  )
+  );
 }

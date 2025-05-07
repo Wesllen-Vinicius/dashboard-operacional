@@ -1,6 +1,6 @@
-import Skeleton from './Skeleton'
+import Skeleton from "./Skeleton";
 
-export default function CargoListSkeleton({ count = 6 }: { count?: number }) {
+export default function ListSkeleton({ count = 6 }: { count?: number }) {
   return (
     <ul className="space-y-2 overflow-y-auto max-h-[400px] pr-1">
       {Array.from({ length: count }).map((_, i) => (
@@ -16,5 +16,5 @@ export default function CargoListSkeleton({ count = 6 }: { count?: number }) {
         </li>
       ))}
     </ul>
-  )
+  );
 }
