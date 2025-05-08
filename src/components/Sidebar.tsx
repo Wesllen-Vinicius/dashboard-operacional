@@ -9,7 +9,8 @@ import {
   FiPackage,
   FiUser,
   FiUsers,
-  FiBriefcase
+  FiBriefcase,
+  FiGrid
 } from 'react-icons/fi'
 import SidebarItem from './SidebarItem'
 
@@ -21,6 +22,7 @@ const navItems = [
   { name: 'Estoque', path: '/dashboard/estoque', icon: <FiArchive /> },
   { name: 'Financeiro', path: '/dashboard/financeiro', icon: <FiDollarSign /> },
   { name: 'Cargos', path: '/dashboard/cargos', icon: <FiBriefcase /> },
+  { name: 'Unidades de Medida', path: '/dashboard/unidades-medida', icon: <FiGrid /> }
 ]
 
 export default function Sidebar() {

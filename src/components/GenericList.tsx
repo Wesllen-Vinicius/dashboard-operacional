@@ -4,6 +4,11 @@ import { useMemo, useState } from "react";
 import ListSkeleton from "./ListSkeleton";
 import { FiEdit2, FiTrash2 } from "react-icons/fi";
 
+interface DisplayField<T> {
+  key: keyof T;
+  label: string;
+}
+
 interface GenericListProps<T> {
   items: T[];
   searchableField: keyof T;
@@ -13,7 +18,8 @@ interface GenericListProps<T> {
   renderItem?: (item: T) => React.ReactNode;
   searchPlaceholder?: string;
   emptyMessage?: string;
-  skeleton?: React.ReactNode; // 👈 novo prop
+  skeleton?: React.ReactNode;
+  displayFields?: DisplayField<T>[];
 }
 
 export function GenericList<T>({
