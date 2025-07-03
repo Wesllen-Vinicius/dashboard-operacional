@@ -7,72 +7,99 @@ import {
     query,
     orderBy,
     runTransaction,
-    Timestamp,
-    serverTimestamp
+    serverTimestamp,
+    QuerySnapshot,
+    DocumentData,
+    Timestamp
 } from "firebase/firestore";
+import { User } from "firebase/auth";
 
-interface ContaAPagar {
+// Definindo um tipo mais completo para as contas a pagar, com base nos dados do sistema.
+export interface ContaAPagar {
     id: string;
     valor: number;
     status: 'Pendente' | 'Paga';
-    despesaId?: string; // ID da despesa se for uma despesa operacional
+    fornecedorId: string;
+    notaFiscal: string;
+    parcela: string;
+    dataEmissao: Date;
+    dataVencimento: Date;
+    compraId?: string;
+    despesaId?: string;
 }
 
-export const subscribeToContasAPagar = (callback: (contas: any[]) => void) => {
-    const q = query(collection(db, "contasAPagar"), orderBy("dataVencimento", "asc"));
+/**
+ * Inscreve-se para receber atualizações em tempo real das contas a pagar.
+ * @param callback A função para ser chamada com os dados atualizados.
+ * @returns Uma função para cancelar a subscrição.
+ */
+export const subscribeToContasAPagar = (callback: (contas: ContaAPagar[]) => void) => {
+    try {
+        const q = query(collection(db, "contasAPagar"), orderBy("dataVencimento", "asc"));
 
-    return onSnapshot(q, (snapshot) => {
-        const data = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data(),
-            dataEmissao: (doc.data().dataEmissao as Timestamp).toDate(),
-            dataVencimento: (doc.data().dataVencimento as Timestamp).toDate(),
-        }));
-        callback(data);
-    });
+        return onSnapshot(q, (snapshot: QuerySnapshot<DocumentData>) => {
+            const data = snapshot.docs.map(doc => {
+                const docData = doc.data();
+                return {
+                    id: doc.id,
+                    ...docData,
+                    dataEmissao: (docData.dataEmissao as Timestamp).toDate(),
+                    dataVencimento: (docData.dataVencimento as Timestamp).toDate(),
+                } as ContaAPagar;
+            });
+            callback(data);
+        });
+    } catch (e) {
+        console.error("Erro ao inscrever-se nas contas a pagar:", e);
+        throw new Error("Não foi possível carregar as contas a pagar.");
+    }
 };
 
 /**
- * Realiza a baixa de uma conta a pagar.
+ * Realiza a baixa de uma conta a pagar de forma atômica.
  * Atualiza o status da conta, debita o valor da conta bancária e registra a movimentação.
- * @param conta - O objeto da conta a pagar.
- * @param contaBancariaId - O ID da conta bancária de onde o valor será debitado.
- * @param user - O usuário que está realizando a operação.
+ * @param conta O objeto da conta a pagar.
+ * @param contaBancariaId O ID da conta bancária de onde o valor será debitado.
+ * @param user O usuário autenticado que está realizando a operação.
  */
-export const pagarConta = async (conta: ContaAPagar, contaBancariaId: string, user: { uid: string, displayName: string | null }) => {
+export const pagarConta = async (conta: ContaAPagar, contaBancariaId: string, user: User) => {
+    // Referências aos documentos que serão alterados na transação
     const contaPagarRef = doc(db, "contasAPagar", conta.id);
     const contaBancariaRef = doc(db, "contasBancarias", contaBancariaId);
     const movimentacaoRef = doc(collection(db, "movimentacoesBancarias"));
 
     try {
         await runTransaction(db, async (transaction) => {
+            // 1. Obter os dados atuais da conta bancária
             const contaBancariaDoc = await transaction.get(contaBancariaRef);
-
             if (!contaBancariaDoc.exists()) {
-                throw new Error("Conta bancária não encontrada.");
+                throw new Error("A conta bancária de origem não foi encontrada.");
             }
 
             const saldoAtual = contaBancariaDoc.data().saldoAtual || 0;
+            if (saldoAtual < conta.valor) {
+                throw new Error(`Saldo insuficiente na conta selecionada. Saldo: R$ ${saldoAtual.toFixed(2)}`);
+            }
             const novoSaldo = saldoAtual - conta.valor;
 
-            // 1. Atualiza o status da conta a pagar
+            // 2. Atualizar o status da conta a pagar para "Paga"
             transaction.update(contaPagarRef, { status: "Paga" });
 
-            // 2. Se for uma despesa, atualiza o status na coleção de despesas também
+            // 3. Se for uma despesa, atualizar o status na coleção de despesas também
             if (conta.despesaId) {
                 const despesaRef = doc(db, "despesas", conta.despesaId);
                 transaction.update(despesaRef, { status: "Paga" });
             }
 
-            // 3. Atualiza o saldo da conta bancária
+            // 4. Atualizar o saldo da conta bancária
             transaction.update(contaBancariaRef, { saldoAtual: novoSaldo });
 
-            // 4. Registra a movimentação bancária para o extrato
+            // 5. Registrar a movimentação de débito no extrato
             transaction.set(movimentacaoRef, {
                 contaId: contaBancariaId,
                 valor: conta.valor,
                 tipo: 'debito',
-                motivo: `Pagamento de conta: ${conta.id.slice(0,5)}`,
+                motivo: `Pagamento Ref: ${conta.notaFiscal || 'Despesa'} - Parcela: ${conta.parcela}`,
                 saldoAnterior: saldoAtual,
                 saldoNovo: novoSaldo,
                 data: serverTimestamp(),
@@ -84,6 +111,7 @@ export const pagarConta = async (conta: ContaAPagar, contaBancariaId: string, us
         });
     } catch (error) {
         console.error("Erro na transação de pagamento: ", error);
+        // Lança o erro para que a UI possa exibi-lo
         throw error;
     }
 };

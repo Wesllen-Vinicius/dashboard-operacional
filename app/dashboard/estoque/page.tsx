@@ -9,6 +9,8 @@ import { format } from "date-fns";
 import { IconAlertTriangle, IconLock } from "@tabler/icons-react";
 import { ColumnDef } from "@tanstack/react-table";
 import { Timestamp } from "firebase/firestore";
+import { z } from "zod";
+
 import { CrudLayout } from "@/components/crud-layout";
 import { GenericTable } from "@/components/generic-table";
 import { Button } from "@/components/ui/button";
@@ -22,7 +24,9 @@ import { useDataStore } from "@/store/data.store";
 import { useAuthStore } from "@/store/auth.store";
 import { movimentacaoSchema, Movimentacao } from "@/lib/schemas";
 import { registrarMovimentacao } from "@/lib/services/estoque.services";
-import z from "zod";
+import { usePermissions } from "@/hooks/use-permissions";
+import { PermissionGuard } from "@/components/permission-guard";
+
 
 const formSchema = movimentacaoSchema.pick({
     produtoId: true,
@@ -35,8 +39,9 @@ type MovimentacaoFormValues = z.infer<typeof formSchema>;
 type MovimentacaoEnriquecida = Movimentacao & { produtoNome: string, dataFormatada: string, registradoPorNome: string };
 
 export default function MovimentacoesEstoquePage() {
+    const { canCreate } = usePermissions('estoque');
     const { produtos, movimentacoes } = useDataStore();
-    const { user, role } = useAuthStore();
+    const { user } = useAuthStore();
 
     const form = useForm<MovimentacaoFormValues>({
         resolver: zodResolver(formSchema),
@@ -56,15 +61,12 @@ export default function MovimentacoesEstoquePage() {
     [produtos]);
 
     const movimentacoesEnriquecidas = useMemo((): MovimentacaoEnriquecida[] => {
-        return movimentacoes.map(mov => {
-            const produto = produtos.find(p => p.id === mov.produtoId);
-            return {
-                ...mov,
-                produtoNome: produto?.nome || 'Produto não encontrado',
-                dataFormatada: mov.data ? format((mov.data as Timestamp).toDate(), 'dd/MM/yyyy HH:mm') : 'N/A',
-                registradoPorNome: mov.registradoPor?.nome || 'Sistema'
-            };
-        });
+        return movimentacoes.map(mov => ({
+            ...mov,
+            produtoNome: produtos.find(p => p.id === mov.produtoId)?.nome || 'Produto não encontrado',
+            dataFormatada: mov.data ? format((mov.data as Timestamp).toDate(), 'dd/MM/yyyy HH:mm') : 'N/A',
+            registradoPorNome: mov.registradoPor?.nome || 'Sistema'
+        }));
     }, [movimentacoes, produtos]);
 
     const dependenciasFaltantes = useMemo(() => {
@@ -77,9 +79,9 @@ export default function MovimentacoesEstoquePage() {
 
 
     const onSubmit: SubmitHandler<MovimentacaoFormValues> = async (values) => {
-        try {
-            if (!user) throw new Error("Usuário não autenticado");
+        if (!user) return toast.error("Usuário não autenticado. Por favor, faça login novamente.");
 
+        try {
             const produtoSelecionado = produtos.find(p => p.id === values.produtoId);
             if (!produtoSelecionado) throw new Error("Produto selecionado inválido.");
 
@@ -88,7 +90,7 @@ export default function MovimentacoesEstoquePage() {
                 produtoNome: produtoSelecionado.nome,
             };
 
-            await registrarMovimentacao(payload, { uid: user.uid, nome: user.displayName || 'Usuário' });
+            await registrarMovimentacao(payload, user);
 
             toast.success("Movimentação de estoque registrada com sucesso!");
             form.reset();
@@ -137,7 +139,7 @@ export default function MovimentacoesEstoquePage() {
             </Alert>
         ) : (
             <Form {...form}>
-                 <fieldset disabled={role !== 'ADMINISTRADOR'} className="disabled:opacity-70 disabled:pointer-events-none">
+                 <fieldset disabled={!canCreate} className="disabled:opacity-70 disabled:pointer-events-none">
                     <form onSubmit={form.handleSubmit(onSubmit)} id="movimentacao-form" className="space-y-4">
                         <FormField name="produtoId" control={form.control} render={({ field }) => (
                             <FormItem>
@@ -192,12 +194,12 @@ export default function MovimentacoesEstoquePage() {
                         </div>
                     </form>
                 </fieldset>
-                {role !== 'ADMINISTRADOR' && (
+                {!canCreate && (
                     <Alert variant="destructive" className="mt-6">
                         <IconLock className="h-4 w-4" />
                         <AlertTitle>Acesso Restrito</AlertTitle>
                         <AlertDescription>
-                            Apenas administradores podem realizar movimentações manuais de estoque.
+                            Você não tem permissão para realizar movimentações manuais de estoque.
                         </AlertDescription>
                     </Alert>
                 )}
@@ -205,21 +207,21 @@ export default function MovimentacoesEstoquePage() {
         )
     );
 
-    const tableContent = (
-        <GenericTable
-            columns={columns}
-            data={movimentacoesEnriquecidas}
-            filterPlaceholder="Filtrar por produto..."
-            filterColumnId="produtoNome"
-        />
-    );
-
     return (
-        <CrudLayout
-            formTitle="Ajuste Manual de Estoque"
-            formContent={formContent}
-            tableTitle="Histórico de Movimentações"
-            tableContent={tableContent}
-        />
+        <PermissionGuard modulo="estoque">
+            <CrudLayout
+                formTitle="Ajuste Manual de Estoque"
+                formContent={formContent}
+                tableTitle="Histórico de Movimentações"
+                tableContent={(
+                    <GenericTable
+                        columns={columns}
+                        data={movimentacoesEnriquecidas}
+                        filterPlaceholder="Filtrar por produto..."
+                        filterColumnId="produtoNome"
+                    />
+                )}
+            />
+        </PermissionGuard>
     );
 }

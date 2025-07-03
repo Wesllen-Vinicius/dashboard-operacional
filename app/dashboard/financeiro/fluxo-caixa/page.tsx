@@ -15,31 +15,23 @@ import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage } from "
 import { DateRangePicker } from "@/components/date-range-picker";
 import { Combobox } from "@/components/ui/combobox";
 import { GenericTable } from "@/components/generic-table";
-import { Badge } from "@/components/ui/badge";
 import { useDataStore } from "@/store/data.store";
-import { getMovimentacoesPorContaEPeriodo } from "@/lib/services/fluxoCaixa.services";
+import { getMovimentacoesPorContaEPeriodo, MovimentacaoBancaria } from "@/lib/services/fluxoCaixa.services";
+import { usePermissions } from "@/hooks/use-permissions";
+import { PermissionGuard } from "@/components/permission-guard";
 
 const filterSchema = z.object({
     contaId: z.string().min(1, "Selecione uma conta."),
     periodo: z.object({
-        from: z.date({required_error: "A data de início é obrigatória."}),
-        to: z.date({required_error: "A data de fim é obrigatória."}),
+        from: z.date({ required_error: "A data de início é obrigatória." }),
+        to: z.date({ required_error: "A data de fim é obrigatória." }),
     }).refine(data => data.from && data.to, { message: "Selecione um período válido." }),
 });
 
 type FilterFormValues = z.infer<typeof filterSchema>;
 
-interface MovimentacaoBancaria {
-    id: string;
-    data: Date;
-    motivo: string;
-    tipo: 'credito' | 'debito';
-    valor: number;
-    saldoAnterior: number;
-    saldoNovo: number;
-}
-
 export default function FluxoCaixaPage() {
+    const { canRead } = usePermissions('financeiro');
     const { contasBancarias } = useDataStore();
     const [isLoading, setIsLoading] = useState(false);
     const [movimentacoes, setMovimentacoes] = useState<MovimentacaoBancaria[]>([]);
@@ -51,7 +43,7 @@ export default function FluxoCaixaPage() {
     });
 
     const contasOptions = useMemo(() =>
-        contasBancarias.map(c => ({ label: `${c.nomeConta} (Banco: ${c.banco})`, value: c.id! })),
+        contasBancarias.map(c => ({ label: `${c.nomeConta} (${c.banco})`, value: c.id! })),
     [contasBancarias]);
 
     const onSubmit: SubmitHandler<FilterFormValues> = async (values) => {
@@ -62,17 +54,17 @@ export default function FluxoCaixaPage() {
             const data = await getMovimentacoesPorContaEPeriodo(values.contaId, values.periodo.from, values.periodo.to);
             setMovimentacoes(data);
 
-            if(data.length > 0) {
+            if (data.length > 0) {
                 setSaldoInicialPeriodo(data[0].saldoAnterior);
             } else {
-                 const contaSelecionada = contasBancarias.find(c => c.id === values.contaId);
-                 if(contaSelecionada) {
-                     setSaldoInicialPeriodo(contaSelecionada.saldoAtual || 0);
-                 }
+                const contaSelecionada = contasBancarias.find(c => c.id === values.contaId);
+                if (contaSelecionada) {
+                    setSaldoInicialPeriodo(contaSelecionada.saldoAtual || 0);
+                }
                 toast.info("Nenhuma movimentação encontrada para esta conta no período selecionado.");
             }
-        } catch (error) {
-            toast.error("Erro ao buscar extrato.");
+        } catch (error: any) {
+            toast.error("Erro ao buscar extrato.", { description: error.message });
         } finally {
             setIsLoading(false);
         }
@@ -95,70 +87,72 @@ export default function FluxoCaixaPage() {
     const saldoFinalPeriodo = movimentacoes.length > 0 ? movimentacoes[movimentacoes.length - 1].saldoNovo : saldoInicialPeriodo;
 
     return (
-        <div className="container mx-auto py-8 px-4 md:px-6 space-y-6">
-            <Card>
-                <CardHeader>
-                    <CardTitle>Fluxo de Caixa / Extrato Bancário</CardTitle>
-                    <CardDescription>Selecione a conta e o período para visualizar as movimentações detalhadas.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <Form {...form}>
-                        <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col sm:flex-row items-end gap-4">
-                             <FormField
-                                name="contaId"
-                                control={form.control}
-                                render={({ field }) => (
-                                <FormItem className="w-full sm:w-auto flex-1">
-                                    <FormLabel>Conta Bancária</FormLabel>
-                                    <Combobox options={contasOptions} {...field} placeholder="Selecione uma conta" searchPlaceholder="Buscar conta..."/>
-                                    <FormMessage />
-                                </FormItem>
-                                )}
-                            />
-                            <FormField
-                                name="periodo"
-                                control={form.control}
-                                render={({ field }) => (
-                                <FormItem className="w-full sm:w-auto">
-                                    <FormLabel>Período</FormLabel>
-                                    <DateRangePicker date={field.value} onDateChange={field.onChange} />
-                                    <FormMessage />
-                                </FormItem>
-                                )}
-                            />
-                            <Button type="submit" disabled={isLoading} className="w-full sm:w-auto">
-                                {isLoading ? "Buscando..." : "Gerar Extrato"}
-                            </Button>
-                        </form>
-                    </Form>
-                </CardContent>
-            </Card>
-
-            {(movimentacoes.length > 0 || saldoInicialPeriodo !== null) && (
-                 <Card>
-                    <CardHeader className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                        <div>
-                             <CardTitle>Extrato do Período</CardTitle>
-                             <CardDescription>
-                                 Conta: {contasOptions.find(c => c.value === form.getValues('contaId'))?.label}
-                             </CardDescription>
-                        </div>
-                        <div className="flex gap-4 sm:gap-8 text-right">
-                             <div>
-                                <p className="text-sm text-muted-foreground">Saldo Inicial</p>
-                                <p className="font-bold text-lg">R$ {saldoInicialPeriodo?.toFixed(2)}</p>
-                             </div>
-                             <div>
-                                <p className="text-sm text-muted-foreground">Saldo Final</p>
-                                <p className="font-bold text-lg text-primary">R$ {saldoFinalPeriodo?.toFixed(2)}</p>
-                             </div>
-                        </div>
+        <PermissionGuard modulo="financeiro">
+            <div className="container mx-auto py-8 px-4 md:px-6 space-y-6">
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Fluxo de Caixa / Extrato Bancário</CardTitle>
+                        <CardDescription>Selecione a conta e o período para visualizar as movimentações detalhadas.</CardDescription>
                     </CardHeader>
                     <CardContent>
-                        <GenericTable columns={columns} data={movimentacoes} />
+                        <Form {...form}>
+                            <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col sm:flex-row items-end gap-4">
+                                <FormField
+                                    name="contaId"
+                                    control={form.control}
+                                    render={({ field }) => (
+                                    <FormItem className="w-full sm:w-auto flex-1">
+                                        <FormLabel>Conta Bancária</FormLabel>
+                                        <Combobox options={contasOptions} {...field} placeholder="Selecione uma conta" searchPlaceholder="Buscar conta..."/>
+                                        <FormMessage />
+                                    </FormItem>
+                                    )}
+                                />
+                                <FormField
+                                    name="periodo"
+                                    control={form.control}
+                                    render={({ field }) => (
+                                    <FormItem className="w-full sm:w-auto">
+                                        <FormLabel>Período</FormLabel>
+                                        <DateRangePicker date={field.value as DateRange | undefined} onDateChange={field.onChange} />
+                                        <FormMessage />
+                                    </FormItem>
+                                    )}
+                                />
+                                <Button type="submit" disabled={isLoading || !canRead} className="w-full sm:w-auto">
+                                    {isLoading ? "Buscando..." : "Gerar Extrato"}
+                                </Button>
+                            </form>
+                        </Form>
                     </CardContent>
-                 </Card>
-            )}
-        </div>
+                </Card>
+
+                {(movimentacoes.length > 0 || saldoInicialPeriodo !== null) && (
+                     <Card>
+                        <CardHeader className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                            <div>
+                                 <CardTitle>Extrato do Período</CardTitle>
+                                 <CardDescription>
+                                     Conta: {contasOptions.find(c => c.value === form.getValues('contaId'))?.label}
+                                 </CardDescription>
+                            </div>
+                            <div className="flex gap-4 sm:gap-8 text-right">
+                                 <div>
+                                    <p className="text-sm text-muted-foreground">Saldo Inicial</p>
+                                    <p className="font-bold text-lg">R$ {saldoInicialPeriodo?.toFixed(2)}</p>
+                                 </div>
+                                 <div>
+                                    <p className="text-sm text-muted-foreground">Saldo Final</p>
+                                    <p className="font-bold text-lg text-primary">R$ {saldoFinalPeriodo?.toFixed(2)}</p>
+                                 </div>
+                            </div>
+                        </CardHeader>
+                        <CardContent>
+                            <GenericTable columns={columns} data={movimentacoes} />
+                        </CardContent>
+                     </Card>
+                )}
+            </div>
+        </PermissionGuard>
     );
 }

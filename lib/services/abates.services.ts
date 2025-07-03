@@ -1,85 +1,106 @@
 import { db } from "@/lib/firebase";
-import { collection, onSnapshot, doc, updateDoc, serverTimestamp, Query, query, where, QuerySnapshot, DocumentData, Timestamp, addDoc } from "firebase/firestore";
+import {
+    collection,
+    onSnapshot,
+    doc,
+    updateDoc,
+    serverTimestamp,
+    query,
+    where,
+    QuerySnapshot,
+    DocumentData,
+    Timestamp,
+    addDoc,
+    QueryConstraint
+} from "firebase/firestore";
 import { DateRange } from "react-day-picker";
-import { z } from "zod";
 import { Abate, abateSchema } from "@/lib/schemas";
+import { User } from "firebase/auth";
 
-const formSchema = abateSchema.pick({
-  data: true,
-  total: true,
-  condenado: true,
-  responsavelId: true,
-  compraId: true,
-});
-type AbateFormValues = z.infer<typeof formSchema>;
+type AbatePayload = Pick<Abate, 'data' | 'total' | 'condenado' | 'responsavelId' | 'compraId'>;
 
-export const addAbate = async (formValues: AbateFormValues, user: { uid: string, nome: string, role: 'ADMINISTRADOR' | 'USUARIO' }) => {
-  try {
-    const dataToSave = {
-      ...formValues,
-      registradoPor: user,
-      status: 'ativo',
-      createdAt: serverTimestamp(),
-      data: Timestamp.fromDate(formValues.data),
-    };
-    await addDoc(collection(db, "abates"), dataToSave);
-  } catch (e) {
-    console.error("Erro ao adicionar abate: ", e);
-    throw new Error("Não foi possível adicionar o registro de abate.");
-  }
-};
-
-export const subscribeToAbatesByDateRange = (dateRange: DateRange | undefined, callback: (abates: Abate[]) => void) => {
-  const q = query(collection(db, "abates"));
-
-  const unsubscribe = onSnapshot(q, (querySnapshot: QuerySnapshot<DocumentData>) => {
-    let abates: Abate[] = [];
-    querySnapshot.forEach((doc) => {
-        const docData = doc.data();
-        const dataToParse = {
-            id: doc.id,
-            ...docData,
-            data: docData.data instanceof Timestamp ? docData.data.toDate() : docData.data
+export const addAbate = async (formValues: AbatePayload, user: User) => {
+    try {
+        const dataToSave = {
+            ...formValues,
+            registradoPor: { uid: user.uid, nome: user.displayName || "N/A" },
+            status: 'ativo' as const,
+            createdAt: serverTimestamp(),
+            data: Timestamp.fromDate(formValues.data),
         };
+        await addDoc(collection(db, "abates"), dataToSave);
+    } catch (e) {
+        console.error("Erro ao adicionar abate: ", e);
+        throw new Error("Não foi possível adicionar o registro de abate.");
+    }
+};
 
-        const parsed = abateSchema.safeParse(dataToParse);
-        if (parsed.success) {
-            abates.push(parsed.data);
-        } else {
-            console.error("Documento de abate inválido:", doc.id, parsed.error.format());
+/**
+ * Inscreve-se para receber atualizações em tempo real dos registros de abates,
+ * com filtros por status e período.
+ * @param status O status para filtrar ('ativo' ou 'inativo').
+ * @param dateRange O período para filtrar os abates.
+ * @param callback A função a ser chamada com os dados atualizados.
+ * @returns Uma função para cancelar a subscrição.
+ */
+export const subscribeToAbatesByStatusAndDateRange = (
+    status: 'ativo' | 'inativo',
+    dateRange: DateRange | undefined,
+    callback: (abates: Abate[]) => void
+) => {
+    try {
+        const qConstraints: QueryConstraint[] = [where("status", "==", status)];
+
+        if (dateRange?.from) {
+            const toDate = dateRange.to || dateRange.from;
+            qConstraints.push(where("data", ">=", Timestamp.fromDate(dateRange.from)));
+            qConstraints.push(where("data", "<=", Timestamp.fromDate(new Date(toDate.setHours(23, 59, 59, 999)))));
         }
-    });
 
-    let filteredData = abates.filter(abate => abate.status !== 'inativo');
+        const q = query(collection(db, "abates"), ...qConstraints);
 
-    if (dateRange?.from) {
-        const toDate = dateRange.to || dateRange.from;
-        const fromTimestamp = new Date(dateRange.from.setHours(0, 0, 0, 0)).getTime();
-        const toTimestamp = new Date(toDate.setHours(23, 59, 59, 999)).getTime();
-        filteredData = filteredData.filter(abate => {
-            const abateTime = abate.data.getTime();
-            return abateTime >= fromTimestamp && abateTime <= toTimestamp;
+        const unsubscribe = onSnapshot(q, (querySnapshot: QuerySnapshot<DocumentData>) => {
+            const abates: Abate[] = [];
+            querySnapshot.forEach((doc) => {
+                const parsed = abateSchema.safeParse({ id: doc.id, ...doc.data() });
+                if (parsed.success) {
+                    abates.push(parsed.data);
+                } else {
+                    console.error("Documento de abate inválido:", doc.id, parsed.error.format());
+                }
+            });
+            callback(abates.sort((a, b) => b.data.getTime() - a.data.getTime()));
+        }, (error) => {
+            console.error("Erro no listener de Abates: ", error);
         });
+
+        return unsubscribe;
+    } catch (e) {
+        console.error("Erro ao inscrever-se nos abates:", e);
+        throw new Error("Não foi possível carregar os registros de abates.");
     }
-
-    callback(filteredData.sort((a, b) => b.data.getTime() - a.data.getTime()));
-  }, (error) => {
-    console.error("Erro no listener de Abates: ", error);
-  });
-
-  return unsubscribe;
 };
 
-export const updateAbate = async (id: string, formValues: Partial<AbateFormValues>) => {
-    const dataToUpdate: { [key:string]: any} = { ...formValues };
-    if (formValues.data) {
-        dataToUpdate.data = Timestamp.fromDate(formValues.data);
+export const updateAbate = async (id: string, formValues: Partial<AbatePayload>) => {
+    try {
+        const abateDoc = doc(db, "abates", id);
+        const dataToUpdate: { [key: string]: any } = { ...formValues };
+        if (formValues.data) {
+            dataToUpdate.data = Timestamp.fromDate(formValues.data);
+        }
+        await updateDoc(abateDoc, dataToUpdate);
+    } catch(e) {
+        console.error("Erro ao atualizar abate:", e);
+        throw new Error("Não foi possível atualizar o registro de abate.");
     }
-    const abateDoc = doc(db, "abates", id);
-    await updateDoc(abateDoc, dataToUpdate);
 };
 
-export const setAbateStatus = async (id:string, status: 'ativo' | 'inativo') => {
-    const abateDoc = doc(db, "abates", id);
-    await updateDoc(abateDoc, { status });
-}
+export const setAbateStatus = async (id: string, status: 'ativo' | 'inativo') => {
+    try {
+        const abateDoc = doc(db, "abates", id);
+        await updateDoc(abateDoc, { status });
+    } catch(e) {
+        console.error("Erro ao alterar status do abate:", e);
+        throw new Error("Não foi possível alterar o status do registro de abate.");
+    }
+};

@@ -1,13 +1,12 @@
 "use client"
 
-import { useState } from "react";
-import { z } from "zod";
-import { useForm } from "react-hook-form";
+import { useState, useEffect } from "react";
+import { useForm, SubmitHandler } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { ColumnDef } from "@tanstack/react-table";
-import { IconPencil, IconTrash } from "@tabler/icons-react";
 import { toast } from "sonner";
-import { Timestamp } from "firebase/firestore";
+import { IconPencil, IconRefresh, IconArchive } from "@tabler/icons-react";
 
 import { CrudLayout } from "@/components/crud-layout";
 import { GenericForm } from "@/components/generic-form";
@@ -16,131 +15,166 @@ import { FormField, FormItem, FormLabel, FormControl, FormMessage } from "@/comp
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Cargo, cargoSchema } from "@/lib/schemas";
-import { addCargo, setCargoStatus, updateCargo } from "@/lib/services/cargos.services";
-import { useAuthStore } from "@/store/auth.store";
+import { addCargo, setCargoStatus, updateCargo, subscribeToCargosByStatus } from "@/lib/services/cargos.services";
 import { useDataStore } from "@/store/data.store";
+import { usePermissions } from "@/hooks/use-permissions";
+import { PermissionGuard } from "@/components/permission-guard";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { ConfirmationDialog } from "@/components/confirmation-dialog";
 
-type CargoFormValues = z.infer<typeof cargoSchema>;
+// Schema para o formulário, omitindo campos gerenciados pelo sistema
+const formSchema = cargoSchema.pick({ nome: true });
+type CargoFormValues = z.infer<typeof formSchema>;
+type StatusFiltro = "ativo" | "inativo";
 
 export default function CargosPage() {
-  const cargos = useDataStore((state) => state.cargos);
-  const { user, role } = useAuthStore();
-  const [isEditing, setIsEditing] = useState<boolean>(false);
+    const { canCreate, canEdit, canInactivate } = usePermissions('cargos');
+    const [cargos, setCargos] = useState<Cargo[]>([]);
+    const [statusFiltro, setStatusFiltro] = useState<StatusFiltro>('ativo');
+    const [isEditing, setIsEditing] = useState<boolean>(false);
+    const [editingId, setEditingId] = useState<string | null>(null);
+    const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+    const [actionToConfirm, setActionToConfirm] = useState<{ id: string, status: StatusFiltro } | null>(null);
 
-  const form = useForm<CargoFormValues>({
-    resolver: zodResolver(cargoSchema),
-    defaultValues: { id: "", nome: "" },
-  });
+    const form = useForm<CargoFormValues>({
+        resolver: zodResolver(formSchema),
+        defaultValues: { nome: "" },
+    });
 
-  const handleEdit = (cargo: Cargo) => {
-    form.reset(cargo);
-    setIsEditing(true);
-  };
+    useEffect(() => {
+        const unsubscribe = subscribeToCargosByStatus(statusFiltro, setCargos);
+        return () => unsubscribe();
+    }, [statusFiltro]);
 
-  const handleInactivate = async (id: string) => {
-    if(!confirm("Tem certeza que deseja inativar este cargo?")) return;
-    try {
-      await setCargoStatus(id, 'inativo');
-      toast.success("Cargo inativado com sucesso!");
-    } catch {
-      toast.error("Erro ao inativar o cargo.");
+    const handleEdit = (cargo: Cargo) => {
+        setIsEditing(true);
+        setEditingId(cargo.id!);
+        form.reset({ nome: cargo.nome });
+    };
+
+    const handleStatusAction = (id: string, newStatus: StatusFiltro) => {
+        setActionToConfirm({ id, status: newStatus });
+        setIsConfirmOpen(true);
+    };
+
+    const confirmStatusChange = async () => {
+        if (!actionToConfirm) return;
+        const { id, status } = actionToConfirm;
+        const actionText = status === 'inativo' ? 'inativar' : 'reativar';
+        try {
+            await setCargoStatus(id, status);
+            toast.success(`Cargo ${actionText === 'inativar' ? 'inativado' : 'reativado'} com sucesso!`);
+        } catch (error) {
+            toast.error(`Erro ao ${actionText} o cargo.`);
+        } finally {
+            setIsConfirmOpen(false);
+            setActionToConfirm(null);
+        }
+    };
+
+    const resetForm = () => {
+        form.reset({ nome: "" });
+        setIsEditing(false);
+        setEditingId(null);
     }
-  };
 
-  const resetForm = () => {
-    form.reset({ id: "", nome: "" });
-    setIsEditing(false);
-  }
+    const onSubmit: SubmitHandler<CargoFormValues> = async (values) => {
+        try {
+            if (isEditing && editingId) {
+                await updateCargo(editingId, { nome: values.nome });
+                toast.success(`Cargo "${values.nome}" atualizado com sucesso!`);
+            } else {
+                await addCargo({ nome: values.nome });
+                toast.success(`Cargo "${values.nome}" adicionado com sucesso!`);
+            }
+            resetForm();
+        } catch {
+            toast.error("Ocorreu um erro ao salvar o cargo.");
+        }
+    };
 
-  const onSubmit = async (values: CargoFormValues) => {
-    try {
-      if (isEditing && values.id) {
-        await updateCargo(values.id, { nome: values.nome });
-        toast.success(`Cargo "${values.nome}" atualizado com sucesso!`);
-      } else {
-        await addCargo({ nome: values.nome });
-        toast.success(`Cargo "${values.nome}" adicionado com sucesso!`);
-      }
-      resetForm();
-    } catch {
-      toast.error("Ocorreu um erro ao salvar o cargo.");
-    }
-  };
+    const columns: ColumnDef<Cargo>[] = [
+        { accessorKey: "nome", header: "Nome do Cargo" },
+        {
+            id: "actions",
+            cell: ({ row }) => {
+                const item = row.original;
+                return (
+                    <div className="text-right">
+                        <Button variant="ghost" size="icon" onClick={() => handleEdit(item)} disabled={!canEdit}>
+                            <IconPencil className="h-4 w-4" />
+                        </Button>
+                        {statusFiltro === 'ativo' ? (
+                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleStatusAction(item.id!, 'inativo')} disabled={!canInactivate}>
+                                <IconArchive className="h-4 w-4" />
+                            </Button>
+                        ) : (
+                            <Button variant="ghost" size="icon" className="text-emerald-500 hover:text-emerald-600" onClick={() => handleStatusAction(item.id!, 'ativo')} disabled={!canInactivate}>
+                                <IconRefresh className="h-4 w-4" />
+                            </Button>
+                        )}
+                    </div>
+                )
+            }
+        }
+    ];
 
-  const columns: ColumnDef<Cargo>[] = [
-    {
-      accessorKey: "nome",
-      header: "Nome do Cargo",
-    },
-    {
-      id: "actions",
-      cell: ({ row }) => {
-        const item = row.original;
-        // CORREÇÃO: Administradores podem sempre editar.
-        const isEditable = role === 'ADMINISTRADOR';
+    const formContent = (
+        <fieldset disabled={isEditing ? !canEdit : !canCreate} className="disabled:opacity-70 disabled:pointer-events-none">
+            <GenericForm schema={formSchema} onSubmit={onSubmit} formId="cargo-form" form={form}>
+                <FormField
+                    control={form.control}
+                    name="nome"
+                    render={({ field }) => (
+                        <FormItem>
+                            <FormLabel>Nome do Cargo</FormLabel>
+                            <FormControl>
+                                <Input placeholder="Ex: Açougueiro, Gerente" {...field} />
+                            </FormControl>
+                            <FormMessage />
+                        </FormItem>
+                    )}
+                />
+                <div className="flex justify-end gap-2 mt-4">
+                    {isEditing && (<Button type="button" variant="outline" onClick={resetForm}>Cancelar</Button>)}
+                    <Button type="submit" form="cargo-form">{isEditing ? "Salvar Alterações" : "Adicionar Cargo"}</Button>
+                </div>
+            </GenericForm>
+        </fieldset>
+    );
 
-        return (
-          <div className="text-right">
-            <Button variant="ghost" size="icon" onClick={() => handleEdit(item)} disabled={!isEditable}>
-              <IconPencil className="h-4 w-4" />
-            </Button>
-            {role === 'ADMINISTRADOR' && (
-                <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleInactivate(item.id!)}>
-                    <IconTrash className="h-4 w-4" />
-                </Button>
-            )}
-          </div>
-        )
-      }
-    }
-  ];
+    const tableControlsComponent = (
+        <div className="flex justify-end w-full">
+            <ToggleGroup type="single" value={statusFiltro} onValueChange={(value: StatusFiltro) => value && setStatusFiltro(value)}>
+                <ToggleGroupItem value="ativo">Ativos</ToggleGroupItem>
+                <ToggleGroupItem value="inativo">Inativos</ToggleGroupItem>
+            </ToggleGroup>
+        </div>
+    );
 
-  const formContent = (
-    <GenericForm
-      schema={cargoSchema}
-      onSubmit={onSubmit}
-      formId="cargo-form"
-      form={form}
-    >
-      <FormField
-        control={form.control}
-        name="nome"
-        render={({ field }) => (
-          <FormItem>
-            <FormLabel>Nome do Cargo</FormLabel>
-            <FormControl>
-              <Input placeholder="Ex: Açougueiro, Gerente de Produção" {...field} />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        )}
-      />
-      <div className="flex justify-end gap-2 mt-4">
-          {isEditing && (
-            <Button type="button" variant="outline" onClick={resetForm}>
-              Cancelar
-            </Button>
-          )}
-        <Button type="submit" form="cargo-form">{isEditing ? "Salvar Alterações" : "Adicionar Cargo"}</Button>
-      </div>
-    </GenericForm>
-  );
-
-  const tableContent = (
-    <GenericTable
-        columns={columns}
-        data={cargos}
-        filterPlaceholder="Filtrar por cargo..."
-        filterColumnId="nome"
-    />
-  );
-
-  return (
-    <CrudLayout
-      formTitle={isEditing ? "Editar Cargo" : "Novo Cargo"}
-      formContent={formContent}
-      tableTitle="Cargos Cadastrados"
-      tableContent={tableContent}
-    />
-  );
+    return (
+        <PermissionGuard modulo="cargos">
+            <ConfirmationDialog
+                open={isConfirmOpen}
+                onOpenChange={setIsConfirmOpen}
+                onConfirm={confirmStatusChange}
+                title={`Confirmar ${actionToConfirm?.status === 'inativo' ? 'Inativação' : 'Reativação'}`}
+                description={`Tem certeza que deseja ${actionToConfirm?.status === 'inativo' ? 'inativar' : 'reativar'} este cargo?`}
+            />
+            <CrudLayout
+                formTitle={isEditing ? "Editar Cargo" : "Novo Cargo"}
+                formContent={formContent}
+                tableTitle="Cargos Cadastrados"
+                tableContent={(
+                    <GenericTable
+                        columns={columns}
+                        data={cargos}
+                        filterPlaceholder="Filtrar por cargo..."
+                        filterColumnId="nome"
+                        tableControlsComponent={tableControlsComponent}
+                    />
+                )}
+            />
+        </PermissionGuard>
+    );
 }

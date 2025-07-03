@@ -1,36 +1,43 @@
-// lib/services/settings.services.ts
 import { db } from "@/lib/firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
-// CORREÇÃO: Importando o schema e o tipo corretos do arquivo central.
 import { companyInfoSchema, CompanyInfo } from "@/lib/schemas";
 
 const settingsDocRef = doc(db, "settings", "companyInfo");
 
 /**
- * Salva as informações da empresa no Firestore.
+ * Salva ou atualiza as informações da empresa no Firestore.
  * @param data - As informações da empresa a serem salvas.
  */
 export const saveCompanyInfo = async (data: CompanyInfo) => {
-  // A validação agora acontece no formulário, então aqui apenas salvamos.
-  await setDoc(settingsDocRef, data, { merge: true });
+    try {
+        // A validação Zod já acontece no formulário antes de chamar este serviço.
+        // O `merge: true` garante que campos não enviados não sejam apagados.
+        await setDoc(settingsDocRef, data, { merge: true });
+    } catch (e) {
+        console.error("Erro ao salvar as informações da empresa: ", e);
+        throw new Error("Não foi possível salvar as configurações da empresa.");
+    }
 };
 
 /**
  * Busca as informações da empresa do Firestore.
- * @returns As informações da empresa salvas ou null se não existirem.
+ * @returns As informações da empresa salvas ou null se não existirem ou forem inválidas.
  */
 export const getCompanyInfo = async (): Promise<CompanyInfo | null> => {
-  const docSnap = await getDoc(settingsDocRef);
-  if (docSnap.exists()) {
-    // Validamos os dados retornados para garantir que estão no formato esperado.
-    const parsedData = companyInfoSchema.safeParse(docSnap.data());
-    if(parsedData.success) {
-      return parsedData.data;
+    try {
+        const docSnap = await getDoc(settingsDocRef);
+        if (docSnap.exists()) {
+            const parsedData = companyInfoSchema.safeParse(docSnap.data());
+            if (parsedData.success) {
+                return parsedData.data;
+            } else {
+                console.warn("Dados de configuração da empresa inválidos no Firestore:", parsedData.error.format());
+                return null;
+            }
+        }
+        return null;
+    } catch(e) {
+        console.error("Erro ao buscar as informações da empresa: ", e);
+        throw new Error("Não foi possível carregar as configurações da empresa.");
     }
-  }
-  return null;
 };
-
-
-export { companyInfoSchema };
-// O schema local foi removido para evitar inconsistências.

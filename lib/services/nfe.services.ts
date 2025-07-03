@@ -1,18 +1,17 @@
-// lib/services/nfe.services.ts
 import { Venda, CompanyInfo, Cliente, Produto } from "@/lib/schemas";
 import axios from 'axios';
 
 /**
- * Chama a API interna do nosso sistema para emitir a Nota Fiscal Eletrônica.
+ * Chama a API Route interna (`/api/nfe/emitir`) para iniciar o processo
+ * de emissão da Nota Fiscal Eletrônica.
  * @param venda - O objeto da venda.
- * @param empresa - As informações da empresa.
- * @param cliente - As informações do cliente.
- * @param todosProdutos - A lista completa de produtos.
- * @returns O resultado do processamento da NF-e.
+ * @param empresa - As informações da empresa (emitente).
+ * @param cliente - As informações do cliente (destinatário).
+ * @param todosProdutos - A lista completa de produtos para consulta de dados fiscais.
+ * @returns O resultado do processamento da NF-e retornado pela API.
  */
 export const emitirNFe = async (venda: Venda, empresa: CompanyInfo, cliente: Cliente, todosProdutos: Produto[]) => {
     try {
-        // Agora a chamada é para o nosso próprio backend
         const response = await axios.post('/api/nfe/emitir', {
             venda,
             empresa,
@@ -21,8 +20,13 @@ export const emitirNFe = async (venda: Venda, empresa: CompanyInfo, cliente: Cli
         });
 
         return response.data;
-    } catch (error: any) {
-        console.error("Erro ao chamar a API interna de NF-e:", error.response?.data || error.message);
-        throw new Error(error.response?.data?.message || "Falha na comunicação com o servidor para emitir a NF-e.");
+    } catch (error) {
+        if (axios.isAxiosError(error)) {
+            const errorMessage = error.response?.data?.message || "Falha na comunicação com o servidor para emitir a NF-e.";
+            console.error("Erro ao chamar a API interna de NF-e:", errorMessage, error.response?.data);
+            throw new Error(errorMessage);
+        }
+        console.error("Erro inesperado ao emitir NF-e:", error);
+        throw new Error("Ocorreu um erro inesperado ao tentar emitir a nota fiscal.");
     }
 };

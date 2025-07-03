@@ -1,9 +1,9 @@
 // app/api/nfe/emitir/route.ts
 
 import { NextRequest, NextResponse } from 'next/server';
-import { Venda, CompanyInfo, Cliente, Produto, ItemVendido } from "@/lib/schemas";
+import { Venda, Produto, ItemVendido } from "@/lib/schemas";
 import { fetchMunicipioData } from '@/lib/services/brasilapi.services';
-import axios, { AxiosError } from 'axios';
+import axios from 'axios';
 
 // --- CONFIGURAÇÃO DE AMBIENTE ---
 const ambiente = process.env.NFE_AMBIENTE || "HOMOLOGACAO";

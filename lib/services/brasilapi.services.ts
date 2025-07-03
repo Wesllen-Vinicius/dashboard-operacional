@@ -1,8 +1,7 @@
-// lib/services/brasilapi.services.ts
 import axios from "axios";
 
-// Interfaces para tipar as respostas
-interface CnpjData {
+// Interfaces para tipar as respostas da BrasilAPI
+export interface CnpjData {
   razao_social: string;
   nome_fantasia: string;
   logradouro: string;
@@ -16,7 +15,7 @@ interface CnpjData {
   ddd_telefone_1: string;
 }
 
-interface CepData {
+export interface CepData {
     cep: string;
     state: string;
     city: string;
@@ -24,57 +23,67 @@ interface CepData {
     street: string;
 }
 
-interface MunicipioData {
+export interface MunicipioData {
     nome: string;
     codigo_ibge: string;
 }
 
+// Cria uma instância do Axios para a BrasilAPI para centralizar a configuração
+const brasilApi = axios.create({
+    baseURL: "https://brasilapi.com.br/api",
+    timeout: 5000, // Timeout de 5 segundos
+});
+
+
 /**
  * Busca dados de um CNPJ na BrasilAPI.
+ * @param cnpj O CNPJ a ser validado (somente números).
+ * @returns Os dados do CNPJ.
  */
 export async function fetchCnpjData(cnpj: string): Promise<CnpjData> {
   try {
-    const response = await axios.get(`https://brasilapi.com.br/api/cnpj/v1/${cnpj}`);
-    if (response.status !== 200 || !response.data || !response.data.razao_social) {
-        throw new Error("Resposta inválida da API. Verifique o CNPJ digitado.");
-    }
+    const response = await brasilApi.get<CnpjData>(`/cnpj/v1/${cnpj}`);
     return response.data;
-  } catch (error: any) {
-    if (error.response && error.response.status === 404) {
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response?.status === 404) {
       throw new Error(`O CNPJ informado não foi encontrado na base da Receita Federal.`);
     }
-    console.error("Erro na BrasilAPI:", error.message);
-    throw new Error("Falha na comunicação com o serviço de consulta. Verifique sua conexão e tente novamente.");
+    console.error("Erro na BrasilAPI (CNPJ):", error);
+    throw new Error("Falha na comunicação com o serviço de consulta de CNPJ.");
   }
 }
 
 /**
  * Busca dados de endereço a partir de um CEP na BrasilAPI.
+ * @param cep O CEP a ser consultado (somente números).
+ * @returns Os dados do endereço correspondente ao CEP.
  */
 export async function fetchCepData(cep: string): Promise<CepData> {
     try {
-        const response = await axios.get(`https://brasilapi.com.br/api/cep/v1/${cep}`);
-        if (response.status !== 200 || !response.data) {
-            throw new Error("Resposta inválida da API de CEP.");
-        }
+        const response = await brasilApi.get<CepData>(`/cep/v1/${cep}`);
         return response.data;
-    } catch (error: any) {
-        if (error.response && error.response.status === 404) {
+    } catch (error) {
+        if (axios.isAxiosError(error) && error.response?.status === 404) {
             throw new Error("CEP não encontrado.");
         }
-        throw new Error("Falha ao se comunicar com a API de consulta de CEP.");
+        console.error("Erro na BrasilAPI (CEP):", error);
+        throw new Error("Falha ao se comunicar com o serviço de consulta de CEP.");
     }
 }
 
 /**
  * Busca o código IBGE de um município a partir da UF.
+ * @param uf A sigla da Unidade Federativa.
+ * @param cidade O nome da cidade.
+ * @returns Os dados do município ou undefined se não for encontrado.
  */
 export async function fetchMunicipioData(uf: string, cidade: string): Promise<MunicipioData | undefined> {
     try {
-        const response = await axios.get<MunicipioData[]>(`https://brasilapi.com.br/api/ibge/municipios/v1/${uf}`);
-        // Normaliza os nomes para uma comparação mais confiável
+        const response = await brasilApi.get<MunicipioData[]>(`/ibge/municipios/v1/${uf}`);
+
         const normalize = (str: string) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
         const cidadeNormalizada = normalize(cidade);
+
         return response.data.find(m => normalize(m.nome) === cidadeNormalizada);
     } catch (error) {
         console.error("Erro ao buscar dados do município:", error);

@@ -1,40 +1,84 @@
 import { db } from "@/lib/firebase";
-import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, query, where, runTransaction } from "firebase/firestore";
-import { ContaBancaria } from "@/lib/schemas";
+import {
+    collection,
+    addDoc,
+    onSnapshot,
+    doc,
+    updateDoc,
+    serverTimestamp,
+    query,
+    where,
+    runTransaction,
+    QuerySnapshot,
+    DocumentData
+} from "firebase/firestore";
+import { ContaBancaria, contaBancariaSchema } from "@/lib/schemas";
 import { User } from "firebase/auth";
 
 type ContaBancariaPayload = Omit<ContaBancaria, 'id' | 'createdAt' | 'saldoAtual' | 'registradoPor' | 'status'>;
 
-export const addContaBancaria = (data: ContaBancariaPayload, user: { uid: string, nome: string }) => {
-  const dataComTimestamp = {
-    ...data,
-    saldoAtual: data.saldoInicial,
-    registradoPor: user,
-    status: 'ativa',
-    createdAt: serverTimestamp(),
-  };
-  return addDoc(collection(db, "contasBancarias"), dataComTimestamp);
+export const addContaBancaria = async (data: ContaBancariaPayload, user: Pick<User, 'uid' | 'displayName'>) => {
+    try {
+        const dataComTimestamp = {
+            ...data,
+            saldoAtual: data.saldoInicial,
+            registradoPor: { uid: user.uid, nome: user.displayName || "N/A" },
+            status: 'ativa' as const,
+            createdAt: serverTimestamp(),
+        };
+        await addDoc(collection(db, "contasBancarias"), dataComTimestamp);
+    } catch (e) {
+        console.error("Erro ao adicionar conta bancária: ", e);
+        throw new Error("Não foi possível adicionar a conta bancária.");
+    }
 };
 
-export const subscribeToContasBancarias = (callback: (contas: ContaBancaria[]) => void) => {
-  // CORREÇÃO: Removido o orderBy da consulta para evitar o erro de índice.
-  const q = query(collection(db, "contasBancarias"), where("status", "==", "ativa"));
+/**
+ * Inscreve-se para receber atualizações em tempo real das contas bancárias por status.
+ * @param status - O status para filtrar ('ativa' ou 'inativa').
+ * @param callback - A função para ser chamada com os dados atualizados.
+ * @returns Uma função para cancelar a subscrição.
+ */
+export const subscribeToContasBancariasByStatus = (status: 'ativa' | 'inativa', callback: (contas: ContaBancaria[]) => void) => {
+    try {
+        const q = query(collection(db, "contasBancarias"), where("status", "==", status));
 
-  return onSnapshot(q, (snapshot) => {
-    const contas = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })) as ContaBancaria[];
-    // A ordenação agora é feita no lado do cliente.
-    const contasOrdenadas = contas.sort((a, b) => a.nomeConta.localeCompare(b.nomeConta));
-    callback(contasOrdenadas);
-  });
+        return onSnapshot(q, (snapshot: QuerySnapshot<DocumentData>) => {
+            const contas: ContaBancaria[] = [];
+            snapshot.forEach(doc => {
+                const parsed = contaBancariaSchema.safeParse({ id: doc.id, ...doc.data() });
+                if (parsed.success) {
+                    contas.push(parsed.data);
+                } else {
+                    console.error("Documento de conta bancária inválido:", doc.id, parsed.error.format());
+                }
+            });
+            const contasOrdenadas = contas.sort((a, b) => a.nomeConta.localeCompare(b.nomeConta));
+            callback(contasOrdenadas);
+        });
+    } catch (e) {
+        console.error("Erro ao inscrever-se nas contas bancárias:", e);
+        throw new Error("Não foi possível carregar as contas bancárias.");
+    }
 };
 
-export const updateContaBancaria = (id: string, data: Partial<ContaBancariaPayload>) => {
-  return updateDoc(doc(db, "contasBancarias", id), data);
+export const updateContaBancaria = async (id: string, data: Partial<ContaBancariaPayload>) => {
+    try {
+        await updateDoc(doc(db, "contasBancarias", id), data);
+    } catch (e) {
+        console.error("Erro ao atualizar conta bancária: ", e);
+        throw new Error("Não foi possível atualizar a conta bancária.");
+    }
 };
 
 export const setContaBancariaStatus = async (id: string, status: 'ativa' | 'inativa') => {
-    const contaDoc = doc(db, "contasBancarias", id);
-    await updateDoc(contaDoc, { status });
+    try {
+        const contaDoc = doc(db, "contasBancarias", id);
+        await updateDoc(contaDoc, { status });
+    } catch (e) {
+        console.error("Erro ao alterar status da conta bancária: ", e);
+        throw new Error("Não foi possível alterar o status da conta bancária.");
+    }
 };
 
 export const registrarMovimentacaoBancaria = async (
@@ -55,6 +99,9 @@ export const registrarMovimentacaoBancaria = async (
             }
 
             const saldoAtual = contaDoc.data().saldoAtual || 0;
+            if (tipo === 'debito' && saldoAtual < valor) {
+                throw new Error(`Saldo insuficiente. Saldo atual: R$ ${saldoAtual.toFixed(2)}`);
+            }
             const novoSaldo = tipo === 'credito' ? saldoAtual + valor : saldoAtual - valor;
 
             transaction.update(contaRef, { saldoAtual: novoSaldo });
